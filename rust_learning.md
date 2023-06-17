@@ -831,3 +831,120 @@ fn returns_summarizable() -> impl Summary {
 
 - [`derive`派生特征](https://course.rs/appendix/derive.html)
   - 简化常用特征实现
+
+---
+
+- 特征对象
+  - 使用方面：类似于`OOP`语言中返回基类，然后统一调用基类的方法（接口），但是`Rust`没有继承，利用枚举灵活性很低
+  - 以`GUI`为例，所有组件都需要实现`draw`的`trait`
+
+```rust
+//trait
+pub trait Draw {
+    fn draw(&self);
+}
+
+//组件
+pub struct Button {
+    pub width: u32,
+    pub height: u32,
+    pub label: String,
+}
+
+impl Draw for Button {
+    fn draw(&self) {
+        // 绘制按钮的代码
+    }
+}
+
+struct SelectBox {
+    width: u32,
+    height: u32,
+    options: Vec<String>,
+}
+
+impl Draw for SelectBox {
+    fn draw(&self) {
+        // 绘制SelectBox的代码
+    }
+}
+
+//基类(OOP)里面这就是多态了
+pub struct Screen {
+    pub components: Vec<?>, //<== 这个 “？” 到底怎么写？
+}
+```
+
+- `Box`指针+`dyn`特征对象
+  - `dyn` 关键字只用在特征对象的类型声明上，在创建时无需使用 `dyn`
+
+```rust
+trait Draw {
+    fn draw(&self) -> String;
+}
+
+impl Draw for u8 {
+    fn draw(&self) -> String {
+        format!("u8: {}", *self)
+    }
+}
+
+impl Draw for f64 {
+    fn draw(&self) -> String {
+        format!("f64: {}", *self)
+    }
+}
+
+// 若 T 实现了 Draw 特征， 则调用该函数时传入的 Box<T> 可以被隐式转换成函数参数签名中的 Box<dyn Draw>
+fn draw1(x: Box<dyn Draw>) {
+    // 由于实现了 Deref 特征，Box 智能指针会自动解引用为它所包裹的值，然后调用该值对应的类型上定义的 `draw` 方法
+    x.draw();
+}
+
+fn draw2(x: &dyn Draw) {
+    x.draw();
+}
+
+fn main() {
+    let x = 1.1f64;
+    // do_something(&x);
+    let y = 8u8;
+
+    // x 和 y 的类型 T 都实现了 `Draw` 特征，因为 Box<T> 可以在函数调用时隐式地被转换为特征对象 Box<dyn Draw> 
+    // 基于 x 的值创建一个 Box<f64> 类型的智能指针，指针指向的数据被放置在了堆上
+    draw1(Box::new(x));
+    // 基于 y 的值创建一个 Box<u8> 类型的智能指针
+    draw1(Box::new(y));
+    draw2(&x);
+    draw2(&y);
+}
+```
+
+- 所以改善前面的数组
+
+```rust
+pub struct Screen {
+    pub components: Vec<Box<dyn Draw>>,
+}
+
+//依次绘制组件
+impl Screen {
+    pub fn run(&self) {
+        for component in self.components.iter() {
+            component.draw();
+        }
+    }
+}
+```
+
+- 为什么不用`Vec<T> + where T : draw`的组合呢? `->` 这样里面`<T>`的内容（为了数据大小一样，做不到`Box`那样动态堆上分发了）就一样了，达不到`Box<dyn draw>`的效果
+
+- 类比`OOP`多态即可
+- 为什么函数参数只能使用`&dyn`和`Box<dyn ..>` ：因为这两者的大小是已知的，在`stack`上面才能进行`push`和`pop`，<u>如果使用`dyn`不会通过编译</u>
+
+---
+
+- 动态分发
+  - 运行时（静态分发是编译时）
+  - 阻止编译器有选择的内联方法代码，这会相应的禁用一些优化
+  - 性能不如静态分发

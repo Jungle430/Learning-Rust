@@ -426,3 +426,408 @@ fn main() {
 }
 ```
 
+- `_s`会绑定值，而`_`不会（所有权转移）
+- 忽略值`..`
+
+---
+
+- 匹配守卫
+  - 后面加上`if`，相当于多了一个`&&`，<b>如果匹配不上会继续查找而不是`break`退出</b>
+
+```rust
+let num = Some(4);
+
+match num {
+    Some(x) if x < 5 => println!("less than five: {}", x),
+    Some(x) => println!("{}", x),
+    None => (),
+}
+```
+
+- 解决覆盖问题
+
+```rust
+fn main() {
+    let x = Some(5);
+    let y = 10;
+
+    match x {
+        Some(50) => println!("Got 50"),
+        Some(n) if n == y => println!("Matched, n = {}", n),
+        _ => println!("Default case, x = {:?}", x),
+    }
+
+    println!("at the end: x = {:?}, y = {}", x, y);
+}
+```
+
+- `Some(n) if n == y => ...`解决了`Some(y)`这种匹配带来的覆盖问题
+
+- 优先级
+
+```rust
+(4 | 5 | 6) if y => ...
+```
+
+---
+
+- `@`绑定：解构之后将其绑定到一个变量上面，使得处理式可以使用该值
+
+```rust
+#![allow(unused)]
+fn main() {
+    enum Message {
+        Hello { id: i32 },
+    }
+
+    let msg = Message::Hello { id: 5 };
+
+    match msg {
+        Message::Hello {
+            id: id_variable @ 3..=7,
+        } => {
+            println!("Found an id in range: {}", id_variable) //可以使用对应的值
+        }
+        Message::Hello { id: 10..=12 } => { //不绑定解构之后使用不了该值
+            println!("Found an id in another range")
+        }
+        Message::Hello { id } => { //不和Range比较也可以使用值
+            println!("Found some other id: {}", id)
+        }
+    }
+}
+```
+
+- 解构后绑定(1.56)
+
+```rust
+#[derive(Debug)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn main() {
+    // 绑定新变量 `p`，同时对 `Point` 进行解构
+    let p @ Point {x: px, y: py } = Point {x: 10, y: 23};
+    println!("x: {}, y: {}", px, py);
+    println!("{:?}", p);
+
+
+    let point = Point {x: 10, y: 5};
+    if let p @ Point {x: 10, y} = point {
+        println!("x is 10 and y is {} in {:?}", y, p);
+    } else {
+        println!("x was not 10 :(");
+    }
+}
+```
+
+- 或条件绑定(1.53)
+
+```rust
+fn main() {
+    match 1 {
+        num @ (1 | 2) => {
+            println!("{}", num);
+        }
+        _ => {}
+    }
+}
+```
+
+## Method
+
+- `self,&self,&mut self` 完全形式 `self: Self`
+  - `Self`实现方法的结构体类型，这个在后面的`trait`里面很常见
+
+- 理解`Self`
+
+```rust
+#[derive(Debug)]
+struct Z<T> {
+    size: Vec<T>,
+    length: usize,
+}
+
+trait Add {
+    type Style;
+
+    fn add(&mut self, style: Self::Style) -> Result<usize, Box<dyn std::error::Error>>;
+}
+
+impl<T> Add for Z<T> {
+    type Style = T;
+
+    fn add(&mut self, style: Self::Style) -> Result<usize, Box<dyn std::error::Error>> {
+        self.size.push(style); //Self::Style => Z<T>::Style
+        self.length = self.size.len();
+        Ok(self.length)
+    }
+}
+```
+
+- `Rust`调用方法的时候会自动对`object`进行解引用，不用像`C++`那样使用`->`
+
+- 构造函数`Object::new(para1, para2, ...)`
+
+---
+
+- <b>可以为枚举实现方法</b>
+
+```rust
+#![allow(unused)]
+enum Message {
+    Quit,
+    Move { x: i32, y: i32 },
+    Write(String),
+    ChangeColor(i32, i32, i32),
+}
+
+impl Message {
+    fn call(&self) {
+        match self {
+            Message::Quit => println!("Quit"),
+            Message::Move { x, y } => println!("Move"),
+            Message::Write(_) => println!("Write"),
+            Message::ChangeColor(_, _, _) => println!("ChangeColor"),
+        }
+    }
+}
+
+fn main() {
+    let m = Message::Write(String::from("hello"));
+    m.call();
+}
+```
+
+## 泛型
+
+- 大致结构
+
+```rust
+fn largest<T>(list: &[T]) -> T {}
+```
+
+- 限制`Trait`
+
+```rust
+fn add<T>(a: T, b: T) -> T
+where
+    T: std::ops::Add<Output = T>,
+{
+    a + b
+}
+```
+
+- 结构体的泛型类比`C++`即可
+
+- 枚举泛型
+
+```rust
+//Option
+enum Option<T> {
+    Some(T),
+    None,
+}
+
+//Result
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+```
+
+- 方法泛型（参考[Method](##Method)）
+  - 若针对某个类型可以单独实现，比如`impl Point<i32> {}`这种
+
+---
+
+- <b><font color='red'>`const`泛型</font></b>
+  - 上面的问题 ：如何不通过引用来处理任意长度的数组？
+
+```rust
+fn display_array<T: std::fmt::Debug, const N: usize>(arr: [T; N]) {
+    println!("{:?}", arr);
+}
+fn main() {
+    let arr: [i32; 3] = [1, 2, 3];
+    display_array(arr);
+
+    let arr: [i32; 2] = [1, 2];
+    display_array(arr);
+}
+```
+
+- 编译过程——元编程，<u>根据模板生成对应的代码（没有运行时开销），零成本抽象高性能，代价是更长的编译时间</u>
+
+## 特征`Trait`
+
+- 类比其他语言的`interface`
+  - 特征定义了**一组可以被共享的行为，只要实现了特征，你就能使用这组行为**
+
+- 比如泛型中保证两个参数能够相加，使用`std::ops::Add`的`Trait`来进行限制
+
+```rust
+fn add<T: std::ops::Add<Output = T>>(a:T, b:T) -> T {
+    a + b
+}
+```
+
+---
+
+- `trait`定义（类比`java`中的`interface`），若在`mod`中，调用方法应该用`use`引入特征
+
+```rust
+pub trait Summary {
+    fn summarize(&self) -> String;
+}
+
+//也可以默认实现
+pub trait Summary {
+    fn summarize(&self) -> String {
+        String::from("(Read more...)")
+    }
+}
+//对应可以直接用该方法或者进行@Override（类比继承即可）
+
+//一些通用的方法可以提前定义好，这样Struct真正实现的时候只用实现特定的一小部分
+pub trait Summary {
+    fn summarize_author(&self) -> String;
+
+    fn summarize(&self) -> String {
+        format!("(Read more from {}...)", self.summarize_author())
+    }
+}
+```
+
+---
+
+- `trait`实现（类比`java`中的`implements interface`）
+
+```rust
+pub struct Post {
+    pub title: String, // 标题
+    pub author: String, // 作者
+    pub content: String, // 内容
+}
+
+impl Summary for Post {
+    fn summarize(&self) -> String {
+        format!("文章{}, 作者是{}", self.title, self.author)
+    }
+}
+
+pub struct Weibo {
+    pub username: String,
+    pub content: String
+}
+
+impl Summary for Weibo {
+    fn summarize(&self) -> String {
+        format!("{}发表了微博{}", self.username, self.content)
+    }
+}
+```
+
+---
+
+- `trait`调用
+
+```rust
+fn main() {
+    let post = Post{title: "Rust语言简介".to_string(),author: "Sunface".to_string(), content: "Rust棒极了!".to_string()};
+    let weibo = Weibo{username: "sunface".to_string(),content: "好像微博没Tweet好用".to_string()};
+
+    println!("{}",post.summarize());
+    println!("{}",weibo.summarize());
+}
+```
+
+---
+
+- 孤儿规则
+  - **如果你想要为类型** `A` **实现特征** `T`**，那么** `A` **或者** `T` **至少有一个是在当前作用域中定义的！**
+  - 保证代码不会被不小心破坏
+
+---
+
+- 特征约束
+
+```rust
+//基本
+pub fn notify<T: Summary>(item1: &T, item2: &T) {}
+
+//多重
+pub fn notify<T: Summary + Display>(item: &T) {}
+
+//where（推荐，可读性很好）
+fn some_function<T, U>(t: &T, u: &U) -> i32
+    where T: Display + Clone,
+          U: Clone + Debug
+{}
+
+//为结构体实现方法也可以这么干
+struct Pair<T> {
+    x: T,
+    y: T,
+}
+
+impl<T> Pair<T> {
+    fn new(x: T, y: T) -> Self {
+        Self {
+            x,
+            y,
+        }
+    }
+}
+
+impl<T: Display + PartialOrd> Pair<T> { //特征约束
+    fn cmp_display(&self) {
+        if self.x >= self.y {
+            println!("The largest member is x = {}", self.x);
+        } else {
+            println!("The largest member is y = {}", self.y);
+        }
+    }
+}
+```
+
+---
+
+- 常用`Display trait -> ToString`
+
+```rust
+fn main() {
+    let z = X { a: 1 };
+    println!("{}", z.to_string());
+}
+
+struct X {
+    a: i32,
+}
+
+impl ToString for X {
+    fn to_string(&self) -> String {
+        format!("{}", self.a)
+    }
+}
+```
+
+- 返回特征（类比基类），<u>常用于迭代器处理闭包</u>
+
+```rust
+fn returns_summarizable() -> impl Summary {
+    Weibo {
+        username: String::from("sunface"),
+        content: String::from(
+            "m1 max太厉害了，电脑再也不会卡",
+        )
+    }
+}
+```
+
+---
+
+- [`derive`派生特征](https://course.rs/appendix/derive.html)
+  - 简化常用特征实现

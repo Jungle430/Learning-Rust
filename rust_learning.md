@@ -103,7 +103,7 @@ fn main() {
 
 ---
 
-- 单元结构体（不关心数据$\rightarrow$“因为没有数据”，只关心方法）
+- 单元结构体（不关心数据 `=>`“因为没有数据”，只关心方法）
 
 ```rust
 #![allow(unused)]
@@ -221,7 +221,7 @@ fn main() {
 ---
 
 - `for`使用的时候注意最好使用集合的引用，防止所有权被代码块“吞噬”
-  - `enumerate()` $\rightarrow$ 下标索引
+  - `enumerate()` `->` 下标索引
   ```rust
   fn main() {
       let a = [4, 3, 2, 1];
@@ -245,7 +245,7 @@ fn main() {
 - `match`
   - `Default`行为用`_/other`表示
   - 每一个分支都必须是一个表达式，且所有分支的表达式<b>最终返回值的类型必须相同</b>，表达式的结果值将作为整个 `match` 表达式的返回值
-  - 逻辑或 $\rightarrow$ `X|Y`
+  - 逻辑或 `->` `X|Y`
 
 - 解构：类比`Option`和`Result`，将里面的值取出来（元组以及复合类型都可以）
 
@@ -948,3 +948,270 @@ impl Screen {
   - 运行时（静态分发是编译时）
   - 阻止编译器有选择的内联方法代码，这会相应的禁用一些优化
   - 性能不如静态分发
+
+---
+
+- `Self`和`self`
+  - 一个指代当前的实例对象，一个指代特征或者方法类型的别名
+
+---
+
+- 当一个特征的所有方法都有如下属性时，它的对象才是安全的
+  - 方法的返回类型不能是 `Self`
+  - 方法没有任何泛型参数
+
+- 标准库中的 `Clone` 特征就不符合对象安全的要求
+
+```rust
+pub trait Clone {
+    fn clone(&self) -> Self;
+}
+```
+
+- 因为它的其中一个方法，返回了 `Self` 类型，因此它是对象不安全的。
+
+- `String` 类型实现了 `Clone` 特征， `String` 实例上调用 `clone` 方法时会得到一个 `String` 实例。类似的，当调用 `Vec<T>` 实例的 `clone` 方法会得到一个 `Vec<T>` 实例。`clone` 的签名需要知道什么类型会代替 `Self`，因为这是它的返回值
+
+```rust
+pub struct Screen {
+    pub components: Vec<Box<dyn Clone>>,
+}
+```
+
+```markdown
+error[E0038]: the trait `std::clone::Clone` cannot be made into an object
+ --> src/lib.rs:2:5
+  |
+2 |     pub components: Vec<Box<dyn Clone>>,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `std::clone::Clone`
+  cannot be made into an object
+  |
+  = note: the trait cannot require that `Self : Sized`
+```
+
+## 深入特征
+
+- 关联类型`Style`
+
+```rust
+#[derive(Debug)]
+struct Z<T> {
+    size: Vec<T>,
+    length: usize,
+}
+
+trait Add {
+    type Style;
+
+    fn add(&mut self, style: Self::Style) -> Result<usize, Box<dyn std::error::Error>>;
+}
+
+impl<T> Add for Z<T> {
+    type Style = T;
+
+    fn add(&mut self, style: Self::Style) -> Result<usize, Box<dyn std::error::Error>> {
+        self.size.push(style); //Self::Style => Z<T>::Style
+        self.length = self.size.len();
+        Ok(self.length)
+    }
+}
+```
+
+---
+
+- 默认泛型类型参数
+
+```rust
+trait Add<RHS=Self> {
+    type Output;
+
+    fn add(self, rhs: RHS) -> Self::Output;
+}
+```
+
+- 默认`RHS`和`Self`一个类型（同类型相加）
+
+```rust
+#[derive(Debug, PartialEq)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+impl Add for Point { //无需再次指定RHS类型
+    type Output = Point;
+
+    fn add(self, other: Point) -> Point {
+        Point {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+//---
+
+struct Millimeters(u32);
+struct Meters(u32);
+
+impl Add<Meters> for Millimeters { //指定RHS类型
+    type Output = Millimeters;
+
+    fn add(self, other: Meters) -> Millimeters {
+        Millimeters(self.0 + (other.0 * 1000))
+    }
+}
+```
+
+---
+
+- 调用同名方法
+  - 优先调用类型上的方法
+  - 如果调用`trait`上面的方法，需要使用`trait::method(para)`的形式
+
+```rust
+fn main() {
+    let person = Human;
+    Pilot::fly(&person); // 调用Pilot特征上的方法
+    Wizard::fly(&person); // 调用Wizard特征上的方法
+    person.fly(); // 调用Human类型自身的方法
+}
+```
+
+- 完全限定语法
+
+```rust
+<Type as Trait>::function(receiver_if_method, next_arg, ...);
+```
+
+---
+
+- 特征约束
+  - 某特征需要其他特征支持
+
+```rust
+use std::fmt::Display;
+
+trait OutlinePrint: Display { //需要Display trait的约束
+    fn outline_print(&self) {
+        let output = self.to_string(); //不然无法调用to_string()
+        let len = output.len();
+        println!("{}", "*".repeat(len + 4));
+        println!("*{}*", " ".repeat(len + 2));
+        println!("* {} *", output);
+        println!("*{}*", " ".repeat(len + 2));
+        println!("{}", "*".repeat(len + 4));
+    }
+}
+```
+
+- `newtype`装箱：绕过孤儿规则
+
+## 集合类型
+
+- 动态数组`Vec`
+  - 当 `Vector` 被删除后，它内部存储的所有内容也会随之被删除
+  - 如果里面的内容一旦被引用，事情就复杂很多（生命周期）
+
+- 下标访问和`get`
+  - 一个是直接返回值，另一个是`Option<&T>`
+  - 越界访问下标会直接崩溃，`get`会返回`None`
+
+- 如果使用不可变借用来指向一个`mut Vec`数组进行更新扩容的时候涉及了新的地址变换，编译器不允许这种情况
+
+- 访问使用迭代，不要用下标+`Range`(上面讲过原理)
+
+- 存储不同元素
+  - 枚举：编译时，限制多
+  - `dyn trait`：运行时，灵活
+
+---
+
+- 哈希表`HashMap`
+  - 平均复杂度为 `O(1)` 的查询方法
+
+- 使用方法
+
+```rust
+use std::collections::HashMap;
+
+// 创建一个HashMap，用于存储宝石种类和对应的数量
+let mut my_gems = HashMap::new(); //HashMap::with_capacity(capacity)提前分配空间
+
+// 将宝石类型和对应的数量写入表中
+my_gems.insert("红宝石", 1);
+my_gems.insert("蓝宝石", 2);
+my_gems.insert("河边捡的误以为是宝石的破石头", 18);
+```
+
+- 堆上运行时内存
+- 迭代器+`Collect`创建
+
+```rust
+fn main() {
+    use std::collections::HashMap;
+
+    let teams_list = vec![
+        ("中国队".to_string(), 100),
+        ("美国队".to_string(), 10),
+        ("日本队".to_string(), 50),
+    ];
+
+    let teams_map: HashMap<_,_> = teams_list.into_iter().collect(); //需要显式标注类型
+    
+    println!("{:?}",teams_map)
+}
+```
+
+- 不`Copy`的类型进入`HashMap`同样涉及所有权转移，放入引用请考虑生命周期问题~
+
+- 获取元素`get -> Option<&T>`  
+  - 或者通过`copied()`从`Option<&T> -> Option<T>`
+
+```rust
+let score = scores.get(&team_name).copied().unwrap_or(0);
+```
+
+- 迭代循环
+
+```rust
+for (key, value) in &scores {
+    println!("{}: {}", key, value);
+}
+```
+
+- 更新查询操作
+
+```rust
+fn main() {
+    use std::collections::HashMap;
+
+    let mut scores = HashMap::new();
+
+    scores.insert("Blue", 10);
+
+    // 覆盖已有的值
+    let old = scores.insert("Blue", 20);
+    assert_eq!(old, Some(10));
+
+    // 查询新插入的值
+    let new = scores.get("Blue");
+    assert_eq!(new, Some(&20));
+
+    // 查询Yellow对应的值，若不存在则插入新值
+    let v = scores.entry("Yellow").or_insert(5);
+    assert_eq!(*v, 5); // 不存在，插入5
+
+    // 查询Yellow对应的值，若不存在则插入新值
+    let v = scores.entry("Yellow").or_insert(50);
+    assert_eq!(*v, 5); // 已经存在，因此50没有插入
+}
+```
+
+- 哈希函数
+  - `Key`要实现`std::cmp::Eq` 特征，这样才能做`==`和`!=`的比较
+
+- 若要追求安全，尽可能减少冲突，同时防止拒绝服务（`DoS`）攻击，就要使用密码学安全的哈希函数，`HashMap` 就是使用了这样的哈希函数
+  - 其他需求可以使用第三方库
+
+> 目前，`HashMap` 使用的哈希函数是 `SipHash`，它的性能不是很高，但是安全性很高。`SipHash` 在中等大小的 `Key` 上，性能相当不错，但是对于小型的 `Key` （例如整数）或者大型 `Key` （例如字符串）来说，性能还是不够好。若你需要极致性能，例如实现算法，可以考虑这个库：[ahash](https://github.com/tkaitchuck/ahash)。

@@ -1215,3 +1215,405 @@ fn main() {
   - 其他需求可以使用第三方库
 
 > 目前，`HashMap` 使用的哈希函数是 `SipHash`，它的性能不是很高，但是安全性很高。`SipHash` 在中等大小的 `Key` 上，性能相当不错，但是对于小型的 `Key` （例如整数）或者大型 `Key` （例如字符串）来说，性能还是不够好。若你需要极致性能，例如实现算法，可以考虑这个库：[ahash](https://github.com/tkaitchuck/ahash)。
+
+## 生命周期
+
+- 生命周期很可能是`Rust`中最难的部分
+
+```rust
+{
+    let r;
+
+    {
+        let x = 5;
+        r = &x;
+    } //dropped x
+    //r point null
+    println!("r: {}", r);
+}
+```
+
+```markdown
+error[E0597]: `x` does not live long enough
+ --> src\main.rs:5:13
+  |
+5 |         r = &x;
+  |             ^^ borrowed value does not live long enough
+6 |     }
+  |     - `x` dropped here while still borrowed
+7 |     println!("{}", r);
+  |                    - borrow later used here
+
+For more information about this error, try `rustc --explain E0597`.
+error: could not compile `practice_daily` due to previous error
+```
+
+- 生命周期
+
+```rust
+{
+    let r;                // ---------+-- 'a
+                          //          |
+    {                     //          |
+        let x = 5;        // -+-- 'b  |
+        r = &x;           //  |       |
+    }                     // -+       |
+                          //          |
+    println!("r: {}", r); //          |
+} 
+```
+
+- b < a，最后造成了引用指向`null`
+
+```rust
+{
+    let x = 5;            // ----------+-- 'b
+                          //           |
+    let r = &x;           // --+-- 'a  |
+                          //   |       |
+    println!("r: {}", r); //   |       |
+                          // --+       |
+}
+```
+
+- 引用的生命周期小于等于本体的生命周期就可以避免该情况，避免了空指针的危险，编译通过
+
+---
+
+- 函数中的生命周期
+
+```rust
+fn longest(x: &str, y: &str) -> &str {
+    if x.len() > y.len() {
+        x
+    } else {
+        y
+    }
+}
+```
+
+```markdown
+error[E0106]: missing lifetime specifier
+ --> src\main.rs:9:33
+  |
+9 | fn longest(x: &str, y: &str) -> &str {
+  |               ----     ----     ^ expected named lifetime parameter
+  |
+  = help: this function's return type contains a borrowed value, but the signature does not say whether it is borrowed from `x` or `y`
+help: consider introducing a named lifetime parameter
+  |
+9 | fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+  |           ++++     ++          ++          ++
+
+For more information about this error, try `rustc --explain E0106`.
+```
+
+- 在存在多个引用时，编译器有时会无法自动推导生命周期
+  - 此时就需要我们手动去标注，通过为参数标注合适的生命周期来帮助编译器进行借用检查的分析
+  - 生命周期标注并不会改变任何引用的实际作用域，**标记的生命周期只是为了取悦编译器，让编译器不要难为我们**
+
+```rust
+fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() > y.len() {
+        x
+    } else {
+        y
+    }
+}
+```
+
+- 该函数签名表明对于某些生命周期 `'a`，函数的两个参数都至少跟 `'a` 活得一样久，同时函数的返回引用也至少跟 `'a` 活得一样久。实际上，这意味着返回值的生命周期与参数生命周期中的较小值一致
+
+- 当把具体的引用传给 `longest` 时，那生命周期 `'a` 的大小就是 `x` 和 `y` 的作用域的重合部分，<u>换句话说，`'a` 的大小将等于 `x` 和 `y` 中较小的那个</u>
+
+---
+
+- 结构体中的生命周期
+  - 为了保证结构体内部的引用和结构体本身的生命周期联系上，也需要进行标注
+
+```rust
+struct ImportantExcerpt<'a> {
+    part: &'a str, //结构体 ImportantExcerpt 所引用的字符串 str 必须比该结构体活得更久!!!，这样里面的引用才不会指空
+}
+
+fn main() {
+    let novel = String::from("Call me Ishmael. Some years ago...");
+    let first_sentence = novel.split('.').next().expect("Could not find a '.'");
+    let i = ImportantExcerpt {
+        part: first_sentence,
+    };
+    println!("{}", i.part);
+}
+```
+
+- 编译不过的例子
+
+```rust
+#[derive(Debug)]
+struct ImportantExcerpt<'a> {
+    part: &'a str,
+}
+
+fn main() {
+    let i;
+    {
+        let novel = String::from("Call me Ishmael. Some years ago...");
+        let first_sentence = novel.split('.').next().expect("Could not find a '.'");
+        i = ImportantExcerpt {
+            part: first_sentence,
+        };
+    }
+    println!("{:?}",i);
+}
+```
+
+---
+
+- 生命周期消除
+
+- 在开始之前有几点需要注意：
+
+  - 消除规则不是万能的，若编译器不能确定某件事是正确时，会直接判为不正确，那么你还是需要手动标注生命周期
+
+  - **函数或者方法中，参数的生命周期被称为 `输入生命周期`，返回值的生命周期被称为 `输出生命周期`**
+
+- 三条消除规则
+  - 编译器使用三条消除规则来确定哪些场景不需要显式地去标注生命周期
+  - 若编译器发现三条规则都不适用时，就会报错，提示你需要手动标注生命周期。
+
+1. **每一个引用参数都会获得独自的生命周期**
+
+- 例如一个引用参数的函数就有一个生命周期标注: `fn foo(x: &i32) => fn foo<'a>(x: &'a i32)`，两个引用参数的有两个生命周期标注:`fn foo(x: &i32, y: &i32) => fn foo<'a, 'b>(x: &'a i32, y: &'b i32)`, 依此类推
+
+2. **若只有一个输入生命周期(函数参数中只有一个引用类型)，那么该生命周期会被赋给所有的输出生命周期**，也就是所有返回值的生命周期都等于该输入生命周期
+
+- 例如函数 `fn foo(x: &i32) -> &i32`，`x` 参数的生命周期会被自动赋给返回值 `&i32`，因此该函数等同于 `fn foo<'a>(x: &'a i32) -> &i32 => fn foo<'a>(x: &'a i32) -> &'a i32`
+
+3. **若存在多个输入生命周期，且其中一个是 `&self` 或 `&mut self`，则 `&self` 的生命周期被赋给所有的输出生命周期**
+
+- 拥有 `&self` 形式的参数，说明该函数是一个 `方法`，该规则让方法的使用便利度大幅提升
+
+```rust
+impl<'a> ImportantExcerpt<'a> {
+    fn announce_and_return_part(&self, announcement: &str) -> &str {
+        println!("Attention please: {}", announcement);
+        self.part
+    }
+}
+
+//==>next
+impl<'a> ImportantExcerpt<'a> {
+    fn announce_and_return_part<'b>(&'a self, announcement: &'b str) -> &str {
+        println!("Attention please: {}", announcement);
+        self.part
+    }
+}
+
+//==>next
+impl<'a> ImportantExcerpt<'a> {
+    fn announce_and_return_part<'b>(&'a self, announcement: &'b str) -> &'a str {
+        println!("Attention please: {}", announcement);
+        self.part
+    }
+}
+
+//lifetime `b <= lifetime 'a like a trait
+//==>
+impl<'a> ImportantExcerpt<'a> {
+    fn announce_and_return_part<'b>(&'a self, announcement: &'b str) -> &'b str
+    where
+        'a: 'b,
+    {
+        println!("Attention please: {}", announcement);
+        self.part
+    }
+}
+
+//or
+impl<'a: 'b, 'b> ImportantExcerpt<'a> {
+    fn announce_and_return_part(&'a self, announcement: &'b str) -> &'b str {
+        println!("Attention please: {}", announcement);
+        self.part
+    }
+}
+```
+
+---
+
+- **静态生命周期**`'static`
+  - 存活和程序一样久
+  - 之前见过的：`&str`硬编码值`let s: &'static str = "lalala";`
+
+- 但是要考虑如果真的使用`static`，那么悬空指针怎么办？
+
+## 返回值和错误处理
+
+- `panic!`不可恢复错误
+
+  - 当调用执行该宏时，**程序会打印出一个错误信息，展开报错点往前的函数调用堆栈，最后退出程序**
+
+  - <u>确定程序是彻底寄了再用这个</u>，比如磁盘没电了，机房着火了那种情况
+
+- 更详细的栈展开信息(`Windows`)
+
+```shell
+$env:RUST_BACKTRACE=1 ; cargo run
+```
+
+- 经典情况，`Vec`下标越界访问，C可以惯着你，Rust直接给你崩掉！
+
+- 两种方式：栈展开和栈终止，配置文件里面自己调就行
+
+- **子线程`panic!`对主程序没有影响（所以任务尽量发给子线程）**
+- 最终的输出结果是取决于哪个线程 `panic`
+  - 对于 `main` 线程，操作系统提供的终止功能 `core::intrinsics::abort()` 会被调用，最终结束当前的 `panic` 进程
+  - 如果是其它子线程，那么子线程就会简单的终止，同时信息会在稍后通过 `std::thread::join()` 进行收集
+
+---
+
+- `Result<T,E>`
+
+```rust
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+```
+
+- 类比`go`里面的`err`，但是这个具有强制处理的性质(`err`程序员自己可以忽略)
+
+- 解构`Err`注意模式匹配，各方面情况考虑（子错误）
+
+- `unwrap`和`expect`
+  - 它们的作用就是，如果返回成功，就将 `Ok(T)` 中的值取出来，如果失败，就直接 `panic`，真的勇士绝不多 BB，直接崩溃
+  - `expect` 跟 `unwrap` 很像，也是遇到错误直接 `panic`, 但是会带上自定义的错误提示信息，相当于重载了错误打印的函数
+
+```rust
+fn main() {
+    let f = File::open("hello.txt").unwrap();
+}
+
+fn main() {
+    let f = File::open("hello.txt").expect("Failed to open hello.txt");
+}
+```
+
+- `?`的使用，同时错误可以通过`From`进行转换
+  - <u>大类型统一错误，子类型实现`From`即可</u>
+
+```rust
+use std::fs::File;
+use std::io;
+use std::io::Read;
+
+fn read_username_from_file() -> Result<String, io::Error> {
+    let mut s = String::new();
+
+    File::open("hello.txt")?.read_to_string(&mut s)?;
+
+    Ok(s)
+}
+```
+
+- `Result + ? = Err => Option + ? = None` 
+
+```rust
+fn first(arr: &[i32]) -> Option<&i32> {
+   let v = arr.get(0)?;
+   Some(v)
+}
+
+//==> Linked call
+fn last_char_of_first_line(text: &str) -> Option<char> {
+    text.lines().next()?.chars().last()
+}
+```
+
+- `?` 操作符需要一个变量来承载正确的值
+
+  - `let v = xxx()?;`
+
+  - `xxx()?.yyy()?;`
+
+---
+
+- 带返回值的`main`函数
+
+```rust
+use std::fs::File;
+
+fn main() {
+    let f = File::open("hello.txt")?;
+}
+```
+
+- 返回类型对不上
+  - 使用另一种形式
+
+```rust
+use std::error::Error; //Rust 中抽象层次最高的错误，其它标准库中的错误都实现了该特征，因此我们可以用该特征对象代表一切错误
+use std::fs::File;
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let f = File::open("hello.txt")?;
+
+    Ok(())
+}
+```
+
+- `try!`宏（新版本已经被`?`取代，少用）
+
+```rust
+macro_rules! try {
+    ($e:expr) => (match $e {
+        Ok(val) => val,
+        Err(err) => return Err(::std::convert::From::from(err)),
+    });
+}
+```
+
+---
+
+- 可见性
+
+  - 将结构体设置为 `pub`，但它的所有字段依然是私有的
+
+  - 将枚举设置为 `pub`，它的所有字段也将对外可见
+
+---
+
+## 包，命名空间
+
+- `use`模块冲突：前面依次加上父模块的名称，直到可以被区分
+
+```rust
+use std::fmt;
+use std::io;
+
+fn function1() -> fmt::Result {
+    // --snip--
+}
+
+fn function2() -> io::Result<()> {
+    // --snip--
+}
+```
+
+- 或者使用`as`
+
+```rust
+use std::fmt::Result;
+use std::io::Result as IoResult;
+
+fn function1() -> Result {
+    // --snip--
+}
+
+fn function2() -> IoResult<()> {
+    // --snip--
+}
+```
+
+- `self => use xxx::{self, yyy}`
+
+- `*`引入所有项
